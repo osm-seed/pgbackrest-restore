@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "restore.name" . }}
+  labels: {{- include "restore.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "restore.labels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432

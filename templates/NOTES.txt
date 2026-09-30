@@ -1,0 +1,13 @@
+Restoring into {{ .Release.Namespace }}/{{ include "restore.name" . }}
+{{- if .Values.target.time }} to {{ .Values.target.time }}{{ else if .Values.target.set }} from set {{ .Values.target.set }}{{ else }} to the latest WAL{{ end }}.
+
+Follow it:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "restore.name" . }} -c restore -f    # download
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "restore.name" . }} -c postgres -f   # WAL replay
+
+Ready when postgres logs "database system is ready to accept connections". Then:
+  kubectl -n {{ .Release.Namespace }} exec -it deploy/{{ include "restore.name" . }} -c postgres -- psql -U postgres
+
+Remove everything, data included:
+  helm -n {{ .Release.Namespace }} uninstall {{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} delete pvc {{ include "restore.name" . }}

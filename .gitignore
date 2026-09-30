@@ -1,0 +1,3 @@
+# Filled-in env files hold S3 keys and the cipher pass.
+.env*
+!.env.example

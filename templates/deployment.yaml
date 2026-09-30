@@ -1,0 +1,129 @@
+{{- if not .Values.image.name }}
+{{- fail "set image.name to the image the source database runs" }}
+{{- end }}
+{{- if and .Values.target.time .Values.target.set }}
+{{- fail "set target.time or target.set, not both" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "restore.name" . }}
+  labels: {{- include "restore.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # Two pods on one data directory would corrupt it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "restore.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "restore.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # The postgres user in the official image. pgBackRest must write the
+      # files as the user that will run the server.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      initContainers:
+        - name: restore
+          image: "{{ .Values.image.name }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PGDATA
+              value: {{ .Values.postgres.pgdata }}
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              # Runs on every pod start. Restore only once: a restart must not
+              # wipe a database someone is already looking at.
+              if [ -f "$PGDATA/PG_VERSION" ]; then
+                echo "==> $PGDATA already restored, skipping"
+                exit 0
+              fi
+              install -d -m 700 "$PGDATA"
+
+              pgbackrest --stanza={{ .Values.source.stanza }} info
+
+              ARGS="--stanza={{ .Values.source.stanza }} --process-max={{ .Values.restore.processMax }}"
+              # archive_mode=off in the restored cluster: it can never push WAL
+              # back into the repo it came from.
+              ARGS="$ARGS --archive-mode=off"
+              {{- if .Values.target.time }}
+              ARGS="$ARGS --type=time --target-action=promote"
+              TARGET={{ .Values.target.time | quote }}
+              echo "==> restore to $TARGET"
+              {{- else if .Values.target.set }}
+              ARGS="$ARGS --set={{ .Values.target.set }} --type=immediate --target-action=promote"
+              TARGET=""
+              echo "==> restore backup set {{ .Values.target.set }}"
+              {{- else }}
+              TARGET=""
+              echo "==> restore latest: last backup and every WAL after it"
+              {{- end }}
+
+              START=$(date +%s)
+              if [ -n "$TARGET" ]; then
+                pgbackrest $ARGS --target="$TARGET" restore
+              else
+                pgbackrest $ARGS restore
+              fi
+              echo "==> files restored in $(( $(date +%s) - START ))s. Postgres replays WAL next."
+              date -u +%FT%TZ > "$PGDATA/../restore-finished-at"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: pgbackrest
+              mountPath: /etc/pgbackrest
+              readOnly: true
+      containers:
+        - name: postgres
+          image: "{{ .Values.image.name }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PGDATA
+              value: {{ .Values.postgres.pgdata }}
+          # The restored data has its own users and passwords. PG_VERSION is
+          # there, so the entrypoint skips initdb and just starts the server.
+          args:
+            - postgres
+            {{- range $k, $v := .Values.postgres.settings }}
+            - -c
+            - {{ printf "%s=%v" $k $v | quote }}
+            {{- end }}
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 10
+          {{- with .Values.postgres.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # restore_command in the restored config calls `pgbackrest
+            # archive-get`, so the server needs the repo too.
+            - name: pgbackrest
+              mountPath: /etc/pgbackrest
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "restore.name" . }}
+        - name: pgbackrest
+          secret:
+            secretName: {{ include "restore.secret" . }}
+            defaultMode: 0440

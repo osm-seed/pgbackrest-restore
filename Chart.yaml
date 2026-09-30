@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pgbackrest-restore
+description: Restore a pgBackRest backup into Postgres, to a point in time or to the latest WAL.
+type: application
+version: 0.1.0
+appVersion: "2.59.1"

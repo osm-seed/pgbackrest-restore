@@ -1,0 +1,48 @@
+# ${VARS} are filled from the env file by deploy.sh (envsubst). Install with
+# deploy.sh, not plain helm, or they stay as literal text.
+
+# Postgres image that matches the source database: same major version, same
+# extensions, and pgBackRest installed. osm-seed's web-db image has it.
+image:
+  name: "${IMAGE}"         # full image, e.g. ghcr.io/osm-seed/db:0.1.0
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The pgBackRest repo to restore from. Use keys that can only READ this path:
+# see "Never write to the source" in the README.
+source:
+  stanza: main
+  bucket: "${S3_BUCKET}"
+  path: "${S3_PATH}"
+  region: us-east-1
+  endpoint: s3.amazonaws.com
+  accessKey: "${S3_ACCESS_KEY}"
+  secretKey: "${S3_SECRET_KEY}"
+  cipherPass: "${CIPHER_PASS}"   # empty if the repo is not encrypted
+  # Or bring your own Secret with a `pgbackrest.conf` key, and leave the above empty.
+  existingSecret: ""
+
+# Where to stop. All empty: the latest backup plus every WAL after it.
+target:
+  time: "${TARGET_TIME}"         # "2026-09-30 18:00:00+00", with the time zone
+  set: ""                  # a backup label from `pgbackrest info`, e.g. 20260929-191553F
+
+restore:
+  processMax: 4            # parallel downloads
+
+postgres:
+  pgdata: /var/lib/postgresql/data/pgdata
+  # Passed as `-c key=value`. The source may be tuned for a bigger machine.
+  settings:
+    shared_buffers: 1GB
+    # With hot_standby on, recovery stops if max_connections and friends are
+    # lower than on the source. Nothing reads during recovery here anyway.
+    hot_standby: "off"
+  resources: {}
+
+storage:
+  size: "${STORAGE_SIZE}"
+  storageClass: ""         # empty: the cluster default (local-path on k3s)
+
+nodeSelector: {}
+tolerations: []
