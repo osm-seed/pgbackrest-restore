@@ -1,3 +1,12 @@
+{{- $p := .Values.persistenceDisk }}
+{{- $static := include "restore.pv.static" . }}
+{{- $k3s := eq .Values.cloudProvider "k3s" }}
+{{- if and (not $static) $k3s (not $p.localVolumeSize) }}
+{{- fail "k3s: set persistenceDisk.localVolumeHostPath (a folder) or localVolumeSize (local-path)" }}
+{{- end }}
+{{- if and (not $static) (not $k3s) (not $p.size) }}
+{{- fail "aws: set persistenceDisk.AWS_ElasticBlockStore_volumeID (an EBS volume) or size (a new one)" }}
+{{- end }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -5,9 +14,22 @@ metadata:
   labels: {{- include "restore.labels" . | nindent 4 }}
 spec:
   accessModes: [ReadWriteOnce]
-  {{- with .Values.storage.storageClass }}
-  storageClassName: {{ . }}
+  {{- if $static }}
+  storageClassName: ""
+  volumeName: {{ include "restore.name" . }}
+  {{- else if $k3s }}
+  storageClassName: local-path
+  {{- else if $p.storageClassName }}
+  storageClassName: {{ $p.storageClassName | quote }}
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.storage.size }}
+      {{- if and $static $k3s }}
+      storage: {{ $p.localVolumeSize | default "1Gi" }}
+      {{- else if $static }}
+      storage: {{ $p.AWS_ElasticBlockStore_size }}
+      {{- else if $k3s }}
+      storage: {{ $p.localVolumeSize }}
+      {{- else }}
+      storage: {{ $p.size }}
+      {{- end }}

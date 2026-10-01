@@ -1,0 +1,32 @@
+{{- if not (has .Values.cloudProvider (list "k3s" "aws")) }}
+{{- fail "cloudProvider must be k3s or aws" }}
+{{- end }}
+{{- if include "restore.pv.static" . }}
+{{- $p := .Values.persistenceDisk }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "restore.name" . }}
+  labels: {{- include "restore.labels" . | nindent 4 }}
+spec:
+  storageClassName: ""
+  accessModes: [ReadWriteOnce]
+  # Deleting the PVC never deletes the data: the folder or the EBS volume stays.
+  persistentVolumeReclaimPolicy: Retain
+  {{- if eq .Values.cloudProvider "aws" }}
+  capacity:
+    storage: {{ $p.AWS_ElasticBlockStore_size }}
+  awsElasticBlockStore:
+    volumeID: {{ $p.AWS_ElasticBlockStore_volumeID }}
+    fsType: ext4
+  {{- else }}
+  {{- if not (hasPrefix "/" $p.localVolumeHostPath) }}
+  {{- fail "persistenceDisk.localVolumeHostPath must be an absolute folder, e.g. /mnt/restore-prod" }}
+  {{- end }}
+  capacity:
+    storage: {{ $p.localVolumeSize | default "1Gi" }}
+  hostPath:
+    path: {{ $p.localVolumeHostPath | quote }}
+    type: DirectoryOrCreate
+  {{- end }}
+{{- end }}

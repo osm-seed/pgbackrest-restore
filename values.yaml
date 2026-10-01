@@ -4,7 +4,7 @@
 # Postgres image that matches the source database: same major version, same
 # extensions, and pgBackRest installed. osm-seed's web-db image has it.
 image:
-  name: "${IMAGE}"         # full image, e.g. ghcr.io/osm-seed/db:0.1.0
+  name: "${IMAGE}" # full image, e.g. ghcr.io/osm-seed/db:0.1.0
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -18,17 +18,17 @@ source:
   endpoint: s3.amazonaws.com
   accessKey: "${S3_ACCESS_KEY}"
   secretKey: "${S3_SECRET_KEY}"
-  cipherPass: "${CIPHER_PASS}"   # empty if the repo is not encrypted
+  cipherPass: "${CIPHER_PASS}" # empty if the repo is not encrypted
   # Or bring your own Secret with a `pgbackrest.conf` key, and leave the above empty.
   existingSecret: ""
 
 # Where to stop. All empty: the latest backup plus every WAL after it.
 target:
-  time: "${TARGET_TIME}"         # "2026-09-30 18:00:00+00", with the time zone
-  set: ""                  # a backup label from `pgbackrest info`, e.g. 20260929-191553F
+  time: "${TARGET_TIME}" # "2026-09-30 18:00:00+00", with the time zone
+  set: "" # a backup label from `pgbackrest info`, e.g. 20260929-191553F
 
 restore:
-  processMax: 4            # parallel downloads
+  processMax: 4 # parallel downloads
 
 postgres:
   pgdata: /var/lib/postgresql/data/pgdata
@@ -40,9 +40,21 @@ postgres:
     hot_standby: "off"
   resources: {}
 
-storage:
+# Where the restored database lives, as in osm-seed. One per restore: storage
+# that already has a database is used as is, not restored again.
+cloudProvider: "${CLOUD_PROVIDER}"   # k3s | aws
+persistenceDisk:
+  # k3s: a folder on the node (static PV), or empty for a local-path PVC
+  localVolumeHostPath: "${HOST_PATH}"
+  localVolumeSize: "${STORAGE_SIZE}"
+  # aws: an existing EBS volume (static PV), or empty for a new one
+  AWS_ElasticBlockStore_volumeID: "${EBS_VOLUME_ID}"
+  AWS_ElasticBlockStore_size: "${STORAGE_SIZE}"
+  storageClassName: "${STORAGE_CLASS}"   # e.g. gp3; empty: the cluster default
   size: "${STORAGE_SIZE}"
-  storageClass: ""         # empty: the cluster default (local-path on k3s)
 
+# Node to run on, as key=value, e.g. disk=nvme or kubernetes.io/hostname=worker-1.
+# With a hostPath folder, pin it to one node: the data only exists there.
+nodeSelectorLabel: "${NODE_SELECTOR}"
 nodeSelector: {}
 tolerations: []

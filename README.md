@@ -11,7 +11,7 @@ but works with any pgBackRest repo on S3.
 ```bash
 cp .env.example .env.prod      # fill it in; .env* is gitignored
 ./deploy.sh .env.prod          # install
-./deploy.sh .env.prod down     # remove it, data included
+./deploy.sh .env.prod down     # remove it; a HOST_PATH folder or EBS volume stays
 ```
 
 `deploy.sh` loads the env file, fills the `${VARS}` in `values.yaml` with it

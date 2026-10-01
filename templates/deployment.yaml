@@ -23,7 +23,13 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- $ns := deepCopy .Values.nodeSelector }}
+      {{- with .Values.nodeSelectorLabel }}
+      {{- $kv := splitn "=" 2 . }}
+      {{- if not $kv._1 }}{{ fail "nodeSelectorLabel must be key=value, e.g. disk=nvme" }}{{ end }}
+      {{- $_ := set $ns $kv._0 $kv._1 }}
+      {{- end }}
+      {{- with $ns }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}
@@ -34,8 +40,26 @@ spec:
       securityContext:
         runAsUser: 999
         runAsGroup: 999
+        # Group-owns the mounted Secret, so postgres can read pgbackrest.conf.
         fsGroup: 999
       initContainers:
+        # New hostPath folders and EBS volumes belong to root. Hand the volume
+        # to postgres before anything writes to it.
+        - name: permissions
+          image: "{{ .Values.image.name }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "==> before: $(stat -c '%U:%G %a' /var/lib/postgresql/data) /var/lib/postgresql/data"
+              chown 999:999 /var/lib/postgresql/data
+              echo "==> after:  $(stat -c '%U:%G %a' /var/lib/postgresql/data). Next: restore."
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
         - name: restore
           image: "{{ .Values.image.name }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
