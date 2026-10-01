@@ -4,6 +4,13 @@
 {{- if and .Values.target.time .Values.target.set }}
 {{- fail "set target.time or target.set, not both" }}
 {{- end }}
+{{- $standby := eq .Values.target.type "standby" }}
+{{- if and .Values.target.type (not $standby) }}
+{{- fail "target.type is empty or standby" }}
+{{- end }}
+{{- if and $standby (or .Values.target.time .Values.target.set) }}
+{{- fail "a standby follows the source with no end: leave target.time and target.set empty" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,11 +78,25 @@ spec:
             - |
               set -euo pipefail
               # Runs on every pod start. Restore only once: a restart must not
-              # wipe a database someone is already looking at.
+              # wipe a database someone is already looking at. With delta, the
+              # existing files are reused instead, and only changes downloaded.
+              {{- if eq (toString .Values.restore.delta) "true" }}
+              {{- if $standby }}
+              # Already a standby from an earlier start: leave it following.
+              if [ -f "$PGDATA/standby.signal" ]; then
+                echo "==> $PGDATA is already a standby, skipping"
+                exit 0
+              fi
+              {{- end }}
+              DELTA=--delta
+              echo "==> delta: reuse the files in $PGDATA, download only what differs"
+              {{- else }}
+              DELTA=""
               if [ -f "$PGDATA/PG_VERSION" ]; then
                 echo "==> $PGDATA already restored, skipping"
                 exit 0
               fi
+              {{- end }}
               install -d -m 700 "$PGDATA"
 
               pgbackrest --stanza={{ .Values.source.stanza }} info
@@ -83,8 +104,14 @@ spec:
               ARGS="--stanza={{ .Values.source.stanza }} --process-max={{ .Values.restore.processMax }}"
               # archive_mode=off in the restored cluster: it can never push WAL
               # back into the repo it came from.
-              ARGS="$ARGS --archive-mode=off"
-              {{- if .Values.target.time }}
+              ARGS="$ARGS --archive-mode=off $DELTA"
+              {{- if $standby }}
+              # standby.signal: replays WAL and keeps asking the repo for more,
+              # until promoted.
+              ARGS="$ARGS --type=standby"
+              TARGET=""
+              echo "==> standby: follow the source until promoted"
+              {{- else if .Values.target.time }}
               ARGS="$ARGS --type=time --target-action=promote"
               TARGET={{ .Values.target.time | quote }}
               echo "==> restore to $TARGET"
@@ -122,9 +149,17 @@ spec:
           # there, so the entrypoint skips initdb and just starts the server.
           args:
             - postgres
-            {{- range $k, $v := .Values.postgres.settings }}
+            {{- $settings := deepCopy .Values.postgres.settings }}
+            {{- if $standby }}{{ $_ := set $settings "hot_standby" "on" }}{{ end }}
+            {{- range $k, $v := $settings }}
             - -c
             - {{ printf "%s=%v" $k $v | quote }}
+            {{- end }}
+            {{- with .Values.postgres.settingsList }}
+            {{- range splitList "," . }}
+            - -c
+            - {{ trim . | quote }}
+            {{- end }}
             {{- end }}
           ports:
             - containerPort: 5432

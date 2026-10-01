@@ -36,6 +36,23 @@ kubectl -n restore-test exec -it deploy/prod-1800-pgbackrest-restore -c postgres
 Recovery time = download (printed by the `restore` container) + WAL replay (the
 `postgres` log until "ready").
 
+## Standby: move a database
+
+`TARGET_TYPE=standby` restores and then keeps applying new WAL from the repo,
+about a minute behind the source, until you promote it.
+
+```bash
+./deploy.sh .env.prod            # TARGET_TYPE=standby, PG_SETTINGS at least the source's
+./deploy.sh .env.prod lag        # how far behind it is
+
+# cutover: stop writes on the source, then on the source: select pg_switch_wal();
+./deploy.sh .env.prod lag        # wait until it caught up
+./deploy.sh .env.prod promote    # now a normal database; point the app at it
+```
+
+After promoting, give the new database its own backups, in a new repo path.
+Never the source's.
+
 ## Never write to the source
 
 The restored database must not send its WAL back to the source repo, or it

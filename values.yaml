@@ -22,12 +22,19 @@ source:
   # Or bring your own Secret with a `pgbackrest.conf` key, and leave the above empty.
   existingSecret: ""
 
-# Where to stop. All empty: the latest backup plus every WAL after it.
+# Where to stop. All empty: the latest backup plus every WAL after it, then a
+# normal database. type standby: never stop, keep applying new WAL from the repo
+# until you promote it (./deploy.sh <env> promote). Use it to move a database.
 target:
-  time: "${TARGET_TIME}" # "2026-09-30 18:00:00+00", with the time zone
-  set: "" # a backup label from `pgbackrest info`, e.g. 20260929-191553F
+  type: "${TARGET_TYPE}"   # empty | standby
+  time: "${TARGET_TIME}"   # "2026-09-30 22:30:00+00", with the time zone
+  set: ""                  # a backup label from `pgbackrest info`, e.g. 20260929-191553F
 
 restore:
+  # true: restore over a folder that already has a database, downloading only
+  # the files that differ (pgbackrest --delta). Use it to turn an earlier
+  # restore into a standby without copying everything again.
+  delta: "${RESTORE_DELTA}"
   processMax: 4 # parallel downloads
 
 postgres:
@@ -36,8 +43,12 @@ postgres:
   settings:
     shared_buffers: 1GB
     # With hot_standby on, recovery stops if max_connections and friends are
-    # lower than on the source. Nothing reads during recovery here anyway.
+    # lower than on the source. Nothing reads during a one-off restore, so off.
+    # A standby turns it on, to be read: match the source with PG_SETTINGS.
     hot_standby: "off"
+  # Extra -c settings, comma separated, applied last. For a standby, at least
+  # what the source has: max_connections=200,max_worker_processes=2
+  settingsList: "${PG_SETTINGS}"
   resources: {}
 
 # Where the restored database lives, as in osm-seed. One per restore: storage
