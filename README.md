@@ -21,15 +21,14 @@ latest backup plus every WAL.
 ## Follow and check
 
 ```bash
-kubectl -n restore-test logs deploy/prod-1800-pgbackrest-restore -c restore -f    # download
-kubectl -n restore-test logs deploy/prod-1800-pgbackrest-restore -c postgres -f   # WAL replay
+./deploy.sh .env.staging logs     # the download, then postgres replaying WAL
 ```
 
 It is ready when postgres logs `database system is ready to accept connections`.
 Check the data stops where you asked:
 
 ```bash
-kubectl -n restore-test exec -it deploy/prod-1800-pgbackrest-restore -c postgres -- \
+kubectl -n <NAMESPACE> exec -it deploy/<RELEASE>-pgbackrest-restore -c postgres -- \
   psql -U postgres -d <database> -c "select max(created_at) from changesets"
 ```
 
