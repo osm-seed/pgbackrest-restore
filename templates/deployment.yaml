@@ -77,6 +77,12 @@ spec:
           args:
             - |
               set -euo pipefail
+              # Promoted (./deploy.sh promote): a database of its own now. Never
+              # restore over it, whatever the settings say.
+              if [ -f "$PGDATA/../promoted" ]; then
+                echo "==> $PGDATA was promoted on $(cat "$PGDATA/../promoted"), skipping"
+                exit 0
+              fi
               # Runs on every pod start. Restore only once: a restart must not
               # wipe a database someone is already looking at. With delta, the
               # existing files are reused instead, and only changes downloaded.

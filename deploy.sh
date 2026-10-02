@@ -17,7 +17,21 @@ case "${2:-}" in
     "${PSQL[@]}" "select pg_is_in_recovery() as standby, pg_last_xact_replay_timestamp() as last_applied, now() - pg_last_xact_replay_timestamp() as behind"
     exit ;;
   promote)
+    # pg_promote waits until the database leaves recovery (60s at most).
     "${PSQL[@]}" "select pg_promote()"
+    # The copy keeps the source's passwords. Replace it, so whoever uses the
+    # copy never holds the source's. Sent on stdin: not in any process list.
+    if [ -n "${NEW_DB_PASSWORD:-}" ]; then
+      case "$NEW_DB_PASSWORD" in *"'"*) echo "NEW_DB_PASSWORD cannot contain '" >&2; exit 1 ;; esac
+      printf "ALTER ROLE %s PASSWORD '%s';\n" "${PG_USER:-postgres}" "$NEW_DB_PASSWORD" |
+        kubectl -n "$NAMESPACE" exec -i "deploy/$RELEASE-pgbackrest-restore" -c postgres -- \
+          psql -U "${PG_USER:-postgres}" -d postgres -v ON_ERROR_STOP=1 -q
+      echo "password of ${PG_USER:-postgres} changed"
+    fi
+    # Mark it, so no later pod start restores over it.
+    kubectl -n "$NAMESPACE" exec "deploy/$RELEASE-pgbackrest-restore" -c postgres -- \
+      sh -c 'date -u +%FT%TZ > /var/lib/postgresql/data/promoted'
+    echo "promoted. Set TARGET_TYPE and RESTORE_DELTA empty in $1 before the next ./deploy.sh."
     exit ;;
   down)
     helm -n "$NAMESPACE" uninstall "$RELEASE"
