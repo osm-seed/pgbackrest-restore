@@ -52,6 +52,25 @@ about a minute behind the source, until you promote it.
 After promoting, give the new database its own backups, in a new repo path.
 Never the source's.
 
+The restore writes `archive_mode = 'off'` to `pgdata/postgresql.auto.conf`.
+Postgres reads that file after `postgresql.conf`, so it wins over any
+`archive_mode = on` in your config: the server starts with no error and
+archives nothing. `promote` removes it (`alter system reset`). For a copy
+promoted before that, run in the new database:
+
+```sql
+alter system reset archive_mode;
+alter system reset restore_command;
+```
+
+Or, with no postgres running on it, on the node:
+
+```bash
+ssh root@<node> "sed -i '/^archive_mode/d;/^restore_command/d' <HOST_PATH>/pgdata/postgresql.auto.conf"
+```
+
+`archive_mode` needs a restart. After it, `show archive_mode;` must say `on`.
+
 ## Never write to the source
 
 The restored database must not send its WAL back to the source repo, or it

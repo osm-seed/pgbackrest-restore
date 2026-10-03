@@ -19,6 +19,12 @@ case "${2:-}" in
   promote)
     # pg_promote waits until the database leaves recovery (60s at most).
     "${PSQL[@]}" "select pg_promote()"
+    # The restore wrote archive_mode=off and restore_command to
+    # postgresql.auto.conf, which wins over postgresql.conf. Remove them, so the
+    # app's config decides once it runs this data. Here nothing sets
+    # archive_mode, so this pod keeps the default: off.
+    "${PSQL[@]}" "alter system reset archive_mode"
+    "${PSQL[@]}" "alter system reset restore_command"
     # The copy keeps the source's passwords. Replace it, so whoever uses the
     # copy never holds the source's. Sent on stdin: not in any process list.
     if [ -n "${NEW_DB_PASSWORD:-}" ]; then
